@@ -1,0 +1,687 @@
+import {
+  User, InsertUser,
+  ForumCategory, InsertForumCategory,
+  ForumPost, InsertForumPost,
+  ForumComment, InsertForumComment,
+  SecondOpinionRequest, InsertSecondOpinionRequest,
+  Message, InsertMessage,
+  Pharmacy, InsertPharmacy,
+  Testimonial, InsertTestimonial,
+  users, forumCategories, forumPosts, forumComments,
+  secondOpinionRequests, messages, pharmacies, testimonials
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, and, or, desc, asc } from "drizzle-orm";
+
+export interface IStorage {
+  // User operations
+  getUser(id: number): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  getDoctors(): Promise<User[]>;
+  
+  // Forum category operations
+  getForumCategories(): Promise<ForumCategory[]>;
+  getForumCategoryBySlug(slug: string): Promise<ForumCategory | undefined>;
+  createForumCategory(category: InsertForumCategory): Promise<ForumCategory>;
+  
+  // Forum post operations
+  getForumPosts(): Promise<ForumPost[]>;
+  getForumPostsByCategory(categoryId: number): Promise<ForumPost[]>;
+  getForumPost(id: number): Promise<ForumPost | undefined>;
+  createForumPost(post: InsertForumPost): Promise<ForumPost>;
+  incrementPostViewCount(postId: number): Promise<void>;
+  
+  // Forum comment operations
+  getForumCommentsByPost(postId: number): Promise<ForumComment[]>;
+  createForumComment(comment: InsertForumComment): Promise<ForumComment>;
+  
+  // Second opinion operations
+  getSecondOpinionRequests(): Promise<SecondOpinionRequest[]>;
+  getSecondOpinionRequestsByPatient(patientId: number): Promise<SecondOpinionRequest[]>;
+  getSecondOpinionRequestsByDoctor(doctorId: number): Promise<SecondOpinionRequest[]>;
+  createSecondOpinionRequest(request: InsertSecondOpinionRequest): Promise<SecondOpinionRequest>;
+  updateSecondOpinionRequestStatus(requestId: number, status: string): Promise<SecondOpinionRequest | undefined>;
+  
+  // Message operations
+  getMessages(userId: number): Promise<Message[]>;
+  getConversation(user1Id: number, user2Id: number): Promise<Message[]>;
+  createMessage(message: InsertMessage): Promise<Message>;
+  markMessageAsRead(messageId: number): Promise<void>;
+  
+  // Pharmacy operations
+  getPharmacies(): Promise<Pharmacy[]>;
+  getPharmaciesByRegion(region: string): Promise<Pharmacy[]>;
+  getPharmaciesByCity(city: string): Promise<Pharmacy[]>;
+  getPharmaciesBySpecialization(specialization: string): Promise<Pharmacy[]>;
+  createPharmacy(pharmacy: InsertPharmacy): Promise<Pharmacy>;
+  
+  // Testimonial operations
+  getTestimonials(): Promise<Testimonial[]>;
+  createTestimonial(testimonial: InsertTestimonial): Promise<Testimonial>;
+}
+
+export class MemStorage implements IStorage {
+  private users: Map<number, User>;
+  private forumCategories: Map<number, ForumCategory>;
+  private forumPosts: Map<number, ForumPost>;
+  private forumComments: Map<number, ForumComment>;
+  private secondOpinionRequests: Map<number, SecondOpinionRequest>;
+  private messages: Map<number, Message>;
+  private pharmacies: Map<number, Pharmacy>;
+  private testimonials: Map<number, Testimonial>;
+  
+  private userIdCounter: number;
+  private categoryIdCounter: number;
+  private postIdCounter: number;
+  private commentIdCounter: number;
+  private requestIdCounter: number;
+  private messageIdCounter: number;
+  private pharmacyIdCounter: number;
+  private testimonialIdCounter: number;
+
+  constructor() {
+    this.users = new Map();
+    this.forumCategories = new Map();
+    this.forumPosts = new Map();
+    this.forumComments = new Map();
+    this.secondOpinionRequests = new Map();
+    this.messages = new Map();
+    this.pharmacies = new Map();
+    this.testimonials = new Map();
+    
+    this.userIdCounter = 1;
+    this.categoryIdCounter = 1;
+    this.postIdCounter = 1;
+    this.commentIdCounter = 1;
+    this.requestIdCounter = 1;
+    this.messageIdCounter = 1;
+    this.pharmacyIdCounter = 1;
+    this.testimonialIdCounter = 1;
+    
+    this.initializeData();
+  }
+
+  private initializeData() {
+    // Initialize some default data for the application
+    
+    // Create default forum categories
+    const categories = [
+      { name: "Tumore al seno", slug: "breast-cancer", description: "Discussioni riguardanti il tumore al seno" },
+      { name: "Tumore al polmone", slug: "lung-cancer", description: "Discussioni riguardanti il tumore al polmone" },
+      { name: "Leucemia", slug: "leukemia", description: "Discussioni riguardanti la leucemia" },
+      { name: "Terapie e trattamenti", slug: "therapies-treatments", description: "Discussioni su diverse terapie e trattamenti" },
+      { name: "Supporto emotivo", slug: "emotional-support", description: "Supporto emotivo per pazienti e familiari" }
+    ];
+    
+    categories.forEach(category => {
+      this.createForumCategory(category);
+    });
+    
+    // Create some sample pharmacies
+    const pharmacies = [
+      {
+        name: "Farmacia San Paolo",
+        address: "Via Roma 123",
+        city: "Milano",
+        region: "Lombardia",
+        phone: "02 1234567",
+        specializations: ["preparazioni-galeniche", "nutrizione-oncologica"],
+        rating: 4,
+        reviewCount: 42,
+        imageUrl: "https://images.unsplash.com/photo-1587854692152-cbe660dbde88?ixlib=rb-1.2.1&auto=format&fit=crop&w=400&h=200&q=80",
+        latitude: "45.4642",
+        longitude: "9.1900"
+      },
+      {
+        name: "Farmacia Centrale",
+        address: "Corso Italia 45",
+        city: "Roma",
+        region: "Lazio",
+        phone: "06 9876543",
+        specializations: ["supporto-post-chemioterapia", "presidi-medico-chirurgici"],
+        rating: 5,
+        reviewCount: 35,
+        imageUrl: "https://images.unsplash.com/photo-1586773860418-d37222d8fce3?ixlib=rb-1.2.1&auto=format&fit=crop&w=400&h=200&q=80",
+        latitude: "41.9028",
+        longitude: "12.4964"
+      },
+      {
+        name: "Farmacia Moderna",
+        address: "Via Napoli 78",
+        city: "Napoli",
+        region: "Campania",
+        phone: "081 5557777",
+        specializations: ["preparazioni-galeniche", "nutrizione-oncologica", "presidi-medico-chirurgici"],
+        rating: 3,
+        reviewCount: 28,
+        imageUrl: "https://images.unsplash.com/photo-1580281657702-257584239a55?ixlib=rb-1.2.1&auto=format&fit=crop&w=400&h=200&q=80",
+        latitude: "40.8518",
+        longitude: "14.2681"
+      }
+    ];
+    
+    pharmacies.forEach(pharmacy => {
+      this.createPharmacy(pharmacy);
+    });
+    
+    // Create some testimonials
+    const testimonials = [
+      {
+        name: "Luisa Bianchi",
+        role: "Paziente",
+        location: "Milano",
+        content: "Grazie a Onconet24 ho potuto ricevere un secondo parere che ha cambiato il mio percorso terapeutico. La piattaforma mi ha permesso di contattare facilmente specialisti che altrimenti non avrei mai potuto raggiungere.",
+        rating: 5,
+        imageUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?ixlib=rb-1.2.1&auto=format&fit=crop&w=50&h=50&q=80"
+      },
+      {
+        name: "Dr. Andrea Conti",
+        role: "Oncologo",
+        location: "Torino",
+        content: "Come oncologo, posso affermare che Onconet24 ha rivoluzionato il modo in cui interagisco con i pazienti. La piattaforma mi permette di offrire consulenze anche a persone che vivono lontano, espandendo notevolmente la mia capacità di aiutare.",
+        rating: 5,
+        imageUrl: "https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?ixlib=rb-1.2.1&auto=format&fit=crop&w=50&h=50&q=80"
+      },
+      {
+        name: "Giovanni Russo",
+        role: "Familiare di paziente",
+        location: "Firenze",
+        content: "Quando mio padre ha ricevuto la diagnosi, ci sentivamo persi. Il forum di Onconet24 ci ha messo in contatto con altre famiglie nella nostra situazione e con medici che ci hanno guidato attraverso tutto il percorso di cura.",
+        rating: 4,
+        imageUrl: "https://images.unsplash.com/photo-1566616213894-2d4e1baee5d8?ixlib=rb-1.2.1&auto=format&fit=crop&w=50&h=50&q=80"
+      }
+    ];
+    
+    testimonials.forEach(testimonial => {
+      this.createTestimonial(testimonial);
+    });
+  }
+
+  // User operations
+  async getUser(id: number): Promise<User | undefined> {
+    return this.users.get(id);
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.username.toLowerCase() === username.toLowerCase()
+    );
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.email.toLowerCase() === email.toLowerCase()
+    );
+  }
+
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const id = this.userIdCounter++;
+    const now = new Date();
+    const user: User = { ...insertUser, id, isVerified: false, createdAt: now };
+    this.users.set(id, user);
+    return user;
+  }
+
+  async getDoctors(): Promise<User[]> {
+    return Array.from(this.users.values()).filter(user => user.isDoctor);
+  }
+
+  // Forum category operations
+  async getForumCategories(): Promise<ForumCategory[]> {
+    return Array.from(this.forumCategories.values());
+  }
+
+  async getForumCategoryBySlug(slug: string): Promise<ForumCategory | undefined> {
+    return Array.from(this.forumCategories.values()).find(
+      (category) => category.slug === slug
+    );
+  }
+
+  async createForumCategory(insertCategory: InsertForumCategory): Promise<ForumCategory> {
+    const id = this.categoryIdCounter++;
+    const category: ForumCategory = { ...insertCategory, id, postCount: 0 };
+    this.forumCategories.set(id, category);
+    return category;
+  }
+
+  // Forum post operations
+  async getForumPosts(): Promise<ForumPost[]> {
+    return Array.from(this.forumPosts.values());
+  }
+
+  async getForumPostsByCategory(categoryId: number): Promise<ForumPost[]> {
+    return Array.from(this.forumPosts.values()).filter(
+      (post) => post.categoryId === categoryId
+    );
+  }
+
+  async getForumPost(id: number): Promise<ForumPost | undefined> {
+    return this.forumPosts.get(id);
+  }
+
+  async createForumPost(insertPost: InsertForumPost): Promise<ForumPost> {
+    const id = this.postIdCounter++;
+    const now = new Date();
+    const post: ForumPost = { 
+      ...insertPost, 
+      id, 
+      commentCount: 0, 
+      viewCount: 0, 
+      createdAt: now 
+    };
+    this.forumPosts.set(id, post);
+    
+    // Update category post count
+    const category = this.forumCategories.get(insertPost.categoryId);
+    if (category) {
+      category.postCount += 1;
+      this.forumCategories.set(category.id, category);
+    }
+    
+    return post;
+  }
+
+  async incrementPostViewCount(postId: number): Promise<void> {
+    const post = this.forumPosts.get(postId);
+    if (post) {
+      post.viewCount += 1;
+      this.forumPosts.set(postId, post);
+    }
+  }
+
+  // Forum comment operations
+  async getForumCommentsByPost(postId: number): Promise<ForumComment[]> {
+    return Array.from(this.forumComments.values()).filter(
+      (comment) => comment.postId === postId
+    );
+  }
+
+  async createForumComment(insertComment: InsertForumComment): Promise<ForumComment> {
+    const id = this.commentIdCounter++;
+    const now = new Date();
+    const comment: ForumComment = { ...insertComment, id, createdAt: now };
+    this.forumComments.set(id, comment);
+    
+    // Update post comment count
+    const post = this.forumPosts.get(insertComment.postId);
+    if (post) {
+      post.commentCount += 1;
+      this.forumPosts.set(post.id, post);
+    }
+    
+    return comment;
+  }
+
+  // Second opinion operations
+  async getSecondOpinionRequests(): Promise<SecondOpinionRequest[]> {
+    return Array.from(this.secondOpinionRequests.values());
+  }
+
+  async getSecondOpinionRequestsByPatient(patientId: number): Promise<SecondOpinionRequest[]> {
+    return Array.from(this.secondOpinionRequests.values()).filter(
+      (request) => request.patientId === patientId
+    );
+  }
+
+  async getSecondOpinionRequestsByDoctor(doctorId: number): Promise<SecondOpinionRequest[]> {
+    return Array.from(this.secondOpinionRequests.values()).filter(
+      (request) => request.doctorId === doctorId
+    );
+  }
+
+  async createSecondOpinionRequest(insertRequest: InsertSecondOpinionRequest): Promise<SecondOpinionRequest> {
+    const id = this.requestIdCounter++;
+    const now = new Date();
+    const request: SecondOpinionRequest = { 
+      ...insertRequest, 
+      id, 
+      status: "pending", 
+      createdAt: now 
+    };
+    this.secondOpinionRequests.set(id, request);
+    return request;
+  }
+
+  async updateSecondOpinionRequestStatus(requestId: number, status: string): Promise<SecondOpinionRequest | undefined> {
+    const request = this.secondOpinionRequests.get(requestId);
+    if (request) {
+      request.status = status;
+      this.secondOpinionRequests.set(requestId, request);
+      return request;
+    }
+    return undefined;
+  }
+
+  // Message operations
+  async getMessages(userId: number): Promise<Message[]> {
+    return Array.from(this.messages.values()).filter(
+      (message) => message.receiverId === userId || message.senderId === userId
+    );
+  }
+
+  async getConversation(user1Id: number, user2Id: number): Promise<Message[]> {
+    return Array.from(this.messages.values()).filter(
+      (message) => 
+        (message.senderId === user1Id && message.receiverId === user2Id) ||
+        (message.senderId === user2Id && message.receiverId === user1Id)
+    ).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  async createMessage(insertMessage: InsertMessage): Promise<Message> {
+    const id = this.messageIdCounter++;
+    const now = new Date();
+    const message: Message = { 
+      ...insertMessage, 
+      id, 
+      isRead: false, 
+      createdAt: now 
+    };
+    this.messages.set(id, message);
+    return message;
+  }
+
+  async markMessageAsRead(messageId: number): Promise<void> {
+    const message = this.messages.get(messageId);
+    if (message) {
+      message.isRead = true;
+      this.messages.set(messageId, message);
+    }
+  }
+
+  // Pharmacy operations
+  async getPharmacies(): Promise<Pharmacy[]> {
+    return Array.from(this.pharmacies.values());
+  }
+
+  async getPharmaciesByRegion(region: string): Promise<Pharmacy[]> {
+    return Array.from(this.pharmacies.values()).filter(
+      (pharmacy) => pharmacy.region.toLowerCase() === region.toLowerCase()
+    );
+  }
+
+  async getPharmaciesByCity(city: string): Promise<Pharmacy[]> {
+    return Array.from(this.pharmacies.values()).filter(
+      (pharmacy) => pharmacy.city.toLowerCase() === city.toLowerCase()
+    );
+  }
+
+  async getPharmaciesBySpecialization(specialization: string): Promise<Pharmacy[]> {
+    return Array.from(this.pharmacies.values()).filter(
+      (pharmacy) => pharmacy.specializations.includes(specialization)
+    );
+  }
+
+  async createPharmacy(insertPharmacy: InsertPharmacy): Promise<Pharmacy> {
+    const id = this.pharmacyIdCounter++;
+    const pharmacy: Pharmacy = { 
+      ...insertPharmacy, 
+      id, 
+      reviewCount: insertPharmacy.reviewCount || 0 
+    };
+    this.pharmacies.set(id, pharmacy);
+    return pharmacy;
+  }
+
+  // Testimonial operations
+  async getTestimonials(): Promise<Testimonial[]> {
+    return Array.from(this.testimonials.values());
+  }
+
+  async createTestimonial(insertTestimonial: InsertTestimonial): Promise<Testimonial> {
+    const id = this.testimonialIdCounter++;
+    const testimonial: Testimonial = { ...insertTestimonial, id };
+    this.testimonials.set(id, testimonial);
+    return testimonial;
+  }
+}
+
+import { db } from "./db";
+import { eq, and, or, desc, asc } from "drizzle-orm";
+import {
+  users, forumCategories, forumPosts, forumComments, 
+  secondOpinionRequests, messages, pharmacies, testimonials
+} from "@shared/schema";
+
+export class DatabaseStorage implements IStorage {
+  async getUser(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const [user] = await db
+      .insert(users)
+      .values(insertUser)
+      .returning();
+    return user;
+  }
+
+  async getDoctors(): Promise<User[]> {
+    return db.select().from(users).where(eq(users.isDoctor, true));
+  }
+
+  async getForumCategories(): Promise<ForumCategory[]> {
+    return db.select().from(forumCategories);
+  }
+
+  async getForumCategoryBySlug(slug: string): Promise<ForumCategory | undefined> {
+    const [category] = await db.select().from(forumCategories).where(eq(forumCategories.slug, slug));
+    return category;
+  }
+
+  async createForumCategory(category: InsertForumCategory): Promise<ForumCategory> {
+    const [newCategory] = await db
+      .insert(forumCategories)
+      .values(category)
+      .returning();
+    return newCategory;
+  }
+
+  async getForumPosts(): Promise<ForumPost[]> {
+    return db.select().from(forumPosts).orderBy(desc(forumPosts.createdAt));
+  }
+
+  async getForumPostsByCategory(categoryId: number): Promise<ForumPost[]> {
+    return db
+      .select()
+      .from(forumPosts)
+      .where(eq(forumPosts.categoryId, categoryId))
+      .orderBy(desc(forumPosts.createdAt));
+  }
+
+  async getForumPost(id: number): Promise<ForumPost | undefined> {
+    const [post] = await db.select().from(forumPosts).where(eq(forumPosts.id, id));
+    return post;
+  }
+
+  async createForumPost(post: InsertForumPost): Promise<ForumPost> {
+    const [newPost] = await db
+      .insert(forumPosts)
+      .values(post)
+      .returning();
+
+    // Incrementa il conteggio dei post per la categoria
+    await db
+      .update(forumCategories)
+      .set({ postCount: (currentValue) => `${currentValue} + 1` })
+      .where(eq(forumCategories.id, post.categoryId));
+
+    return newPost;
+  }
+
+  async incrementPostViewCount(postId: number): Promise<void> {
+    await db
+      .update(forumPosts)
+      .set({ viewCount: (currentValue) => `${currentValue} + 1` })
+      .where(eq(forumPosts.id, postId));
+  }
+
+  async getForumCommentsByPost(postId: number): Promise<ForumComment[]> {
+    return db
+      .select()
+      .from(forumComments)
+      .where(eq(forumComments.postId, postId))
+      .orderBy(asc(forumComments.createdAt));
+  }
+
+  async createForumComment(comment: InsertForumComment): Promise<ForumComment> {
+    const [newComment] = await db
+      .insert(forumComments)
+      .values(comment)
+      .returning();
+
+    // Incrementa il conteggio dei commenti per il post
+    await db
+      .update(forumPosts)
+      .set({ commentCount: (currentValue) => `${currentValue} + 1` })
+      .where(eq(forumPosts.id, comment.postId));
+
+    return newComment;
+  }
+
+  async getSecondOpinionRequests(): Promise<SecondOpinionRequest[]> {
+    return db.select().from(secondOpinionRequests).orderBy(desc(secondOpinionRequests.createdAt));
+  }
+
+  async getSecondOpinionRequestsByPatient(patientId: number): Promise<SecondOpinionRequest[]> {
+    return db
+      .select()
+      .from(secondOpinionRequests)
+      .where(eq(secondOpinionRequests.patientId, patientId))
+      .orderBy(desc(secondOpinionRequests.createdAt));
+  }
+
+  async getSecondOpinionRequestsByDoctor(doctorId: number): Promise<SecondOpinionRequest[]> {
+    return db
+      .select()
+      .from(secondOpinionRequests)
+      .where(eq(secondOpinionRequests.doctorId, doctorId))
+      .orderBy(desc(secondOpinionRequests.createdAt));
+  }
+
+  async createSecondOpinionRequest(request: InsertSecondOpinionRequest): Promise<SecondOpinionRequest> {
+    const [newRequest] = await db
+      .insert(secondOpinionRequests)
+      .values(request)
+      .returning();
+    return newRequest;
+  }
+
+  async updateSecondOpinionRequestStatus(requestId: number, status: string): Promise<SecondOpinionRequest | undefined> {
+    const [updatedRequest] = await db
+      .update(secondOpinionRequests)
+      .set({ status })
+      .where(eq(secondOpinionRequests.id, requestId))
+      .returning();
+    return updatedRequest;
+  }
+
+  async getMessages(userId: number): Promise<Message[]> {
+    return db
+      .select()
+      .from(messages)
+      .where(
+        or(
+          eq(messages.senderId, userId),
+          eq(messages.receiverId, userId)
+        )
+      )
+      .orderBy(desc(messages.createdAt));
+  }
+
+  async getConversation(user1Id: number, user2Id: number): Promise<Message[]> {
+    return db
+      .select()
+      .from(messages)
+      .where(
+        or(
+          and(
+            eq(messages.senderId, user1Id),
+            eq(messages.receiverId, user2Id)
+          ),
+          and(
+            eq(messages.senderId, user2Id),
+            eq(messages.receiverId, user1Id)
+          )
+        )
+      )
+      .orderBy(asc(messages.createdAt));
+  }
+
+  async createMessage(message: InsertMessage): Promise<Message> {
+    const [newMessage] = await db
+      .insert(messages)
+      .values(message)
+      .returning();
+    return newMessage;
+  }
+
+  async markMessageAsRead(messageId: number): Promise<void> {
+    await db
+      .update(messages)
+      .set({ isRead: true })
+      .where(eq(messages.id, messageId));
+  }
+
+  async getPharmacies(): Promise<Pharmacy[]> {
+    return db.select().from(pharmacies);
+  }
+
+  async getPharmaciesByRegion(region: string): Promise<Pharmacy[]> {
+    return db
+      .select()
+      .from(pharmacies)
+      .where(eq(pharmacies.region, region));
+  }
+
+  async getPharmaciesByCity(city: string): Promise<Pharmacy[]> {
+    return db
+      .select()
+      .from(pharmacies)
+      .where(eq(pharmacies.city, city));
+  }
+
+  async getPharmaciesBySpecialization(specialization: string): Promise<Pharmacy[]> {
+    // Per cercare array, dovremmo usare un operatore più specifico, ma questo è un approccio semplificato
+    // Questa non è la soluzione ottimale per PostgreSQL, ma è una soluzione semplice per ora
+    const results = await db.select().from(pharmacies);
+    return results.filter(pharmacy => 
+      pharmacy.specializations && pharmacy.specializations.includes(specialization)
+    );
+  }
+
+  async createPharmacy(pharmacy: InsertPharmacy): Promise<Pharmacy> {
+    const [newPharmacy] = await db
+      .insert(pharmacies)
+      .values(pharmacy)
+      .returning();
+    return newPharmacy;
+  }
+
+  async getTestimonials(): Promise<Testimonial[]> {
+    return db.select().from(testimonials);
+  }
+
+  async createTestimonial(testimonial: InsertTestimonial): Promise<Testimonial> {
+    const [newTestimonial] = await db
+      .insert(testimonials)
+      .values(testimonial)
+      .returning();
+    return newTestimonial;
+  }
+}
+
+// Esporta l'istanza di DatabaseStorage come storage principale
+export const storage = new DatabaseStorage();
